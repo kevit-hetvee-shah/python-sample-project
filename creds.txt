@@ -1,0 +1,7 @@
+| Username      | Password      | City        | State | Landmark                |
+  |---------------|---------------|-------------|-------|-------------------------|
+  | john_doe      | Password123!  | New York    | NY    | Times Square            |
+  | jane_smith    | SecurePass456 | Los Angeles | CA    | Hollywood Sign          |
+  | bob_wilson    | MyP@ss789     | Chicago     | IL    | Millennium Park         |
+  | alice_brown   | Alice2024!    | Houston     | TX    | (none)                  |
+  | charlie_davis | Charlie@123   | Phoenix     | AZ    | Desert Botanical Garden |
