@@ -2,16 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import List
 
-from src.models import get_db, Product, User
-from src.schemas import (
+from apps.fastapi.src.models import get_db, Product, User, Cart, Category, Company
+from apps.fastapi.src.schemas import (
     ProductCreate, ProductResponse, UserRegister, UserLogin,
-    UserResponse, UserUpdate, TokenResponse
+    UserResponse, UserUpdate, TokenResponse, CartItemCreate,
+    CartItemResponse, CartItemDetailResponse, CartResponse,
+    CategoryResponse, CompanyResponse, CategoryWithProductsResponse,
+    CompanyWithProductsResponse
 )
-from src.auth import (
+from apps.fastapi.src.auth import (
     get_current_user, authenticate_user, create_access_token,
     get_password_hash
 )
-from src.response_models import ApiResponse, ApiListResponse, ErrorResponse
+from apps.fastapi.src.response_models import ApiResponse, ApiListResponse, ErrorResponse
 
 router = APIRouter()
 
@@ -81,11 +84,17 @@ def list_products(db: Session = Depends(get_db), response: Response = None):
     """
     products = db.query(Product).all()
     response.status_code = status.HTTP_200_OK
+    product_responses = []
+    for p in products:
+        product_dict = ProductResponse.model_validate(p).model_dump()
+        product_dict["category_name"] = p.category.name if p.category else None
+        product_dict["company_name"] = p.company.name if p.company else None
+        product_responses.append(product_dict)
     return ApiListResponse(
         success=True,
         status_code=200,
         message="Products retrieved successfully",
-        data=[ProductResponse.model_validate(p) for p in products]
+        data=product_responses
     )
 
 
@@ -134,11 +143,210 @@ def get_product(product_id: int, db: Session = Depends(get_db), response: Respon
             details={"product_id": product_id}
         )
     response.status_code = status.HTTP_200_OK
+    product_dict = ProductResponse.model_validate(product).model_dump()
+    product_dict["category_name"] = product.category.name if product.category else None
+    product_dict["company_name"] = product.company.name if product.company else None
     return ApiResponse(
         success=True,
         status_code=200,
         message="Product retrieved successfully",
-        data=ProductResponse.model_validate(product)
+        data=product_dict
+    )
+
+
+# ==================== CATEGORY ROUTES ====================
+
+@router.get("/categories", tags=["Categories"])
+def list_categories(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    List all categories with id, name, and description.
+    Supports pagination with skip and limit parameters.
+    """
+    categories = db.query(Category).offset(skip).limit(limit).all()
+    response.status_code = status.HTTP_200_OK
+    return ApiListResponse(
+        success=True,
+        status_code=200,
+        message="Categories retrieved successfully",
+        data=[CategoryResponse.model_validate(c) for c in categories]
+    )
+
+
+@router.get("/categories/{category_id}", tags=["Categories"])
+def get_category(category_id: int, db: Session = Depends(get_db), response: Response = None):
+    """
+    Get a specific category by ID with its products.
+    """
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Category with id {category_id} not found",
+            details={"category_id": category_id}
+        )
+
+    # Get products with category and company names
+    products = db.query(Product).filter(Product.category_id == category_id).all()
+    product_responses = []
+    for p in products:
+        product_dict = ProductResponse.model_validate(p).model_dump()
+        product_dict["category_name"] = p.category.name if p.category else None
+        product_dict["company_name"] = p.company.name if p.company else None
+        product_responses.append(product_dict)
+
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Category retrieved successfully",
+        data={
+            "id": category.id,
+            "name": category.name,
+            "description": category.description,
+            "products": product_responses
+        }
+    )
+
+
+# ==================== COMPANY ROUTES ====================
+
+@router.get("/companies", tags=["Companies"])
+def list_companies(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    List all companies with id, name, description, website_url, and logo_url.
+    Supports pagination with skip and limit parameters.
+    """
+    companies = db.query(Company).offset(skip).limit(limit).all()
+    response.status_code = status.HTTP_200_OK
+    return ApiListResponse(
+        success=True,
+        status_code=200,
+        message="Companies retrieved successfully",
+        data=[CompanyResponse.model_validate(c) for c in companies]
+    )
+
+
+@router.get("/companies/{company_id}", tags=["Companies"])
+def get_company(company_id: int, db: Session = Depends(get_db), response: Response = None):
+    """
+    Get a specific company by ID with its products.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Company with id {company_id} not found",
+            details={"company_id": company_id}
+        )
+
+    # Get products with category and company names
+    products = db.query(Product).filter(Product.company_id == company_id).all()
+    product_responses = []
+    for p in products:
+        product_dict = ProductResponse.model_validate(p).model_dump()
+        product_dict["category_name"] = p.category.name if p.category else None
+        product_dict["company_name"] = p.company.name if p.company else None
+        product_responses.append(product_dict)
+
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Company retrieved successfully",
+        data={
+            "id": company.id,
+            "name": company.name,
+            "description": company.description,
+            "website_url": company.website_url,
+            "logo_url": company.logo_url,
+            "products": product_responses
+        }
+    )
+
+
+# ==================== PRODUCT FILTERING ROUTES ====================
+
+@router.get("/products/by-company/{company_id}", tags=["Products"])
+def get_products_by_company(
+    company_id: int,
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Get all products for a given company by company ID.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Company with id {company_id} not found",
+            details={"company_id": company_id}
+        )
+
+    products = db.query(Product).filter(Product.company_id == company_id).all()
+    response.status_code = status.HTTP_200_OK
+    product_responses = []
+    for p in products:
+        product_dict = ProductResponse.model_validate(p).model_dump()
+        product_dict["category_name"] = p.category.name if p.category else None
+        product_dict["company_name"] = p.company.name if p.company else None
+        product_responses.append(product_dict)
+    return ApiListResponse(
+        success=True,
+        status_code=200,
+        message=f"Products for company '{company.name}' retrieved successfully",
+        data=product_responses
+    )
+
+
+@router.get("/products/by-category/{category_id}", tags=["Products"])
+def get_products_by_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Get all products for a given category by category ID.
+    """
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Category with id {category_id} not found",
+            details={"category_id": category_id}
+        )
+
+    products = db.query(Product).filter(Product.category_id == category_id).all()
+    response.status_code = status.HTTP_200_OK
+    product_responses = []
+    for p in products:
+        product_dict = ProductResponse.model_validate(p).model_dump()
+        product_dict["category_name"] = p.category.name if p.category else None
+        product_dict["company_name"] = p.company.name if p.company else None
+        product_responses.append(product_dict)
+    return ApiListResponse(
+        success=True,
+        status_code=200,
+        message=f"Products for category '{category.name}' retrieved successfully",
+        data=product_responses
     )
 
 
@@ -259,4 +467,227 @@ def update_profile(
         status_code=200,
         message="Profile updated successfully",
         data=UserResponse.model_validate(current_user)
+    )
+
+
+# ==================== CART ROUTES ====================
+
+@router.get("/cart", tags=["Cart"])
+def get_cart(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Get all items in the current user's cart.
+    Requires JWT authentication.
+    """
+    cart_items = db.query(Cart).filter(Cart.user_id == current_user.id).all()
+
+    items_with_products = []
+    total_items = 0
+    total_price = 0.0
+
+    for item in cart_items:
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if product:
+            item_detail = CartItemDetailResponse(
+                id=item.id,
+                user_id=item.user_id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                product=ProductResponse.model_validate(product)
+            )
+            items_with_products.append(item_detail)
+            total_items += item.quantity
+            total_price += product.price * item.quantity
+
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Cart retrieved successfully",
+        data={
+            "items": items_with_products,
+            "total_items": total_items,
+            "total_price": round(total_price, 2)
+        }
+    )
+
+
+@router.post("/cart", tags=["Cart"])
+def add_to_cart(
+    cart_item: CartItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Add a product to the current user's cart.
+    Requires JWT authentication.
+    If product already exists in cart, updates quantity.
+    """
+    # Verify product exists
+    product = db.query(Product).filter(Product.id == cart_item.product_id).first()
+    if not product:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Product with id {cart_item.product_id} not found",
+            details={"product_id": cart_item.product_id}
+        )
+
+    # Check if item already exists in cart
+    existing_item = db.query(Cart).filter(
+        Cart.user_id == current_user.id,
+        Cart.product_id == cart_item.product_id
+    ).first()
+
+    if existing_item:
+        # Update quantity
+        existing_item.quantity += cart_item.quantity
+        db.commit()
+        db.refresh(existing_item)
+        response.status_code = status.HTTP_200_OK
+        return ApiResponse(
+            success=True,
+            status_code=200,
+            message="Cart item quantity updated",
+            data=CartItemResponse.model_validate(existing_item)
+        )
+    else:
+        # Add new item to cart
+        new_cart_item = Cart(
+            user_id=current_user.id,
+            product_id=cart_item.product_id,
+            quantity=cart_item.quantity
+        )
+        db.add(new_cart_item)
+        db.commit()
+        db.refresh(new_cart_item)
+        response.status_code = status.HTTP_201_CREATED
+        return ApiResponse(
+            success=True,
+            status_code=201,
+            message="Item added to cart",
+            data=CartItemResponse.model_validate(new_cart_item)
+        )
+
+
+@router.delete("/cart/{cart_item_id}", tags=["Cart"])
+def remove_from_cart(
+    cart_item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Remove an item from the current user's cart by cart item ID.
+    Requires JWT authentication.
+    """
+    cart_item = db.query(Cart).filter(
+        Cart.id == cart_item_id,
+        Cart.user_id == current_user.id
+    ).first()
+
+    if not cart_item:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Cart item with id {cart_item_id} not found",
+            details={"cart_item_id": cart_item_id}
+        )
+
+    db.delete(cart_item)
+    db.commit()
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Item removed from cart",
+        data=None
+    )
+
+
+@router.put("/cart/{cart_item_id}", tags=["Cart"])
+def update_cart_item_quantity(
+    cart_item_id: int,
+    quantity: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Update the quantity of an item in the current user's cart.
+    Requires JWT authentication.
+    Set quantity to 0 to remove the item.
+    """
+    if quantity < 0:
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return ErrorResponse(
+            success=False,
+            status_code=400,
+            message="Quantity cannot be negative",
+            details={"quantity": quantity}
+        )
+
+    cart_item = db.query(Cart).filter(
+        Cart.id == cart_item_id,
+        Cart.user_id == current_user.id
+    ).first()
+
+    if not cart_item:
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return ErrorResponse(
+            success=False,
+            status_code=404,
+            message=f"Cart item with id {cart_item_id} not found",
+            details={"cart_item_id": cart_item_id}
+        )
+
+    if quantity == 0:
+        db.delete(cart_item)
+        db.commit()
+        response.status_code = status.HTTP_200_OK
+        return ApiResponse(
+            success=True,
+            status_code=200,
+            message="Item removed from cart (quantity set to 0)",
+            data=None
+        )
+
+    cart_item.quantity = quantity
+    db.commit()
+    db.refresh(cart_item)
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Cart item quantity updated",
+        data=CartItemResponse.model_validate(cart_item)
+    )
+
+
+@router.delete("/cart", tags=["Cart"])
+def clear_cart(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    response: Response = None
+):
+    """
+    Clear all items from the current user's cart.
+    Requires JWT authentication.
+    """
+    cart_items = db.query(Cart).filter(Cart.user_id == current_user.id).all()
+    for item in cart_items:
+        db.delete(item)
+    db.commit()
+    response.status_code = status.HTTP_200_OK
+    return ApiResponse(
+        success=True,
+        status_code=200,
+        message="Cart cleared successfully",
+        data=None
     )
