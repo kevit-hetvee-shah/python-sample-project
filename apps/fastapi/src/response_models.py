@@ -22,9 +22,23 @@ class ApiResponse(BaseModel):
         }
 
 
+class PaginationData(BaseModel):
+    """Pagination metadata for list responses."""
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class PaginatedListResponse(BaseModel):
+    """Paginated list data structure."""
+    items: List[Any]
+    pagination: PaginationData
+
+
 class ApiListResponse(ApiResponse):
     """Standard API response structure for successful list requests."""
-    data: List[Any] = Field(default_factory=list)
+    data: PaginatedListResponse
 
     class Config:
         json_schema_extra = {
@@ -32,7 +46,15 @@ class ApiListResponse(ApiResponse):
                 "success": True,
                 "status_code": 200,
                 "message": "Success",
-                "data": []
+                "data": {
+                    "items": [],
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 10,
+                        "total": 100,
+                        "total_pages": 10
+                    }
+                }
             }
         }
 

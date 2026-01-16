@@ -14,7 +14,7 @@ from apps.fastapi.src.auth import (
     get_current_user, authenticate_user, create_access_token,
     get_password_hash
 )
-from apps.fastapi.src.response_models import ApiResponse, ApiListResponse, ErrorResponse
+from apps.fastapi.src.response_models import ApiResponse, ApiListResponse, ErrorResponse, PaginationData, PaginatedListResponse
 
 router = APIRouter()
 
@@ -22,22 +22,41 @@ router = APIRouter()
 
 @router.get("/users", tags=["Users"])
 def list_users(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    page_size: int = 10,
     db: Session = Depends(get_db),
     response: Response = None
 ):
     """
     List all users with id, username, city, state, and landmark.
-    Supports pagination with skip and limit parameters.
+    Supports pagination with page and page_size parameters.
     """
-    users = db.query(User).offset(skip).limit(limit).all()
+    # Calculate skip offset
+    skip = (page - 1) * page_size
+
+    # Get total count
+    total = db.query(User).count()
+
+    # Calculate total pages
+    total_pages = (total + page_size - 1) // page_size
+
+    # Get paginated users
+    users = db.query(User).offset(skip).limit(page_size).all()
+
     response.status_code = status.HTTP_200_OK
     return ApiListResponse(
         success=True,
         status_code=200,
         message="Users retrieved successfully",
-        data=[UserResponse.model_validate(u) for u in users]
+        data=PaginatedListResponse(
+            items=[UserResponse.model_validate(u) for u in users],
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages
+            )
+        )
     )
 
 
@@ -77,24 +96,50 @@ def home(db: Session = Depends(get_db), response: Response = None):
     )
 
 @router.get("/products", tags=["Products"])
-def list_products(db: Session = Depends(get_db), response: Response = None):
+def list_products(
+    page: int = 1,
+    page_size: int = 10,
+    db: Session = Depends(get_db),
+    response: Response = None
+):
     """
     List all products with id, name, price, description, and image_url.
-    Returns 10 dummy products after running migrations.
+    Supports pagination with page and page_size parameters.
     """
-    products = db.query(Product).all()
-    response.status_code = status.HTTP_200_OK
+    # Calculate skip offset
+    skip = (page - 1) * page_size
+
+    # Get total count
+    total = db.query(Product).count()
+
+    # Calculate total pages
+    total_pages = (total + page_size - 1) // page_size
+
+    # Get paginated products
+    products = db.query(Product).offset(skip).limit(page_size).all()
+
+    # Build product responses with category and company names
     product_responses = []
     for p in products:
         product_dict = ProductResponse.model_validate(p).model_dump()
         product_dict["category_name"] = p.category.name if p.category else None
         product_dict["company_name"] = p.company.name if p.company else None
         product_responses.append(product_dict)
+
+    response.status_code = status.HTTP_200_OK
     return ApiListResponse(
         success=True,
         status_code=200,
         message="Products retrieved successfully",
-        data=product_responses
+        data=PaginatedListResponse(
+            items=product_responses,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages
+            )
+        )
     )
 
 
@@ -158,23 +203,58 @@ def get_product(product_id: int, db: Session = Depends(get_db), response: Respon
 
 @router.get("/categories", tags=["Categories"])
 def list_categories(
-    skip: int = 0,
-    limit: int = 100,
+    page: int | None = None,
+    page_size: int | None = None,
     db: Session = Depends(get_db),
     response: Response = None
 ):
     """
     List all categories with id, name, and description.
-    Supports pagination with skip and limit parameters.
+    By default returns all categories. Use page and page_size for pagination.
     """
-    categories = db.query(Category).offset(skip).limit(limit).all()
-    response.status_code = status.HTTP_200_OK
-    return ApiListResponse(
-        success=True,
-        status_code=200,
-        message="Categories retrieved successfully",
-        data=[CategoryResponse.model_validate(c) for c in categories]
-    )
+    # Get total count
+    total = db.query(Category).count()
+
+    # If pagination parameters are provided, return paginated response
+    if page is not None and page_size is not None:
+        skip = (page - 1) * page_size
+        total_pages = (total + page_size - 1) // page_size
+        categories = db.query(Category).offset(skip).limit(page_size).all()
+
+        response.status_code = status.HTTP_200_OK
+        return ApiListResponse(
+            success=True,
+            status_code=200,
+            message="Categories retrieved successfully",
+            data=PaginatedListResponse(
+                items=[CategoryResponse.model_validate(c) for c in categories],
+                pagination=PaginationData(
+                    page=page,
+                    page_size=page_size,
+                    total=total,
+                    total_pages=total_pages
+                )
+            )
+        )
+    else:
+        # Return all categories with consistent structure
+        categories = db.query(Category).all()
+
+        response.status_code = status.HTTP_200_OK
+        return ApiListResponse(
+            success=True,
+            status_code=200,
+            message="Categories retrieved successfully",
+            data=PaginatedListResponse(
+                items=[CategoryResponse.model_validate(c) for c in categories],
+                pagination=PaginationData(
+                    page=1,
+                    page_size=total,
+                    total=total,
+                    total_pages=1
+                )
+            )
+        )
 
 
 @router.get("/categories/{category_id}", tags=["Categories"])
@@ -219,22 +299,41 @@ def get_category(category_id: int, db: Session = Depends(get_db), response: Resp
 
 @router.get("/companies", tags=["Companies"])
 def list_companies(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    page_size: int = 10,
     db: Session = Depends(get_db),
     response: Response = None
 ):
     """
     List all companies with id, name, description, website_url, and logo_url.
-    Supports pagination with skip and limit parameters.
+    Supports pagination with page and page_size parameters.
     """
-    companies = db.query(Company).offset(skip).limit(limit).all()
+    # Calculate skip offset
+    skip = (page - 1) * page_size
+
+    # Get total count
+    total = db.query(Company).count()
+
+    # Calculate total pages
+    total_pages = (total + page_size - 1) // page_size
+
+    # Get paginated companies
+    companies = db.query(Company).offset(skip).limit(page_size).all()
+
     response.status_code = status.HTTP_200_OK
     return ApiListResponse(
         success=True,
         status_code=200,
         message="Companies retrieved successfully",
-        data=[CompanyResponse.model_validate(c) for c in companies]
+        data=PaginatedListResponse(
+            items=[CompanyResponse.model_validate(c) for c in companies],
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages
+            )
+        )
     )
 
 
@@ -283,11 +382,13 @@ def get_company(company_id: int, db: Session = Depends(get_db), response: Respon
 @router.get("/products/by-company/{company_id}", tags=["Products"])
 def get_products_by_company(
     company_id: int,
+    page: int = 1,
+    page_size: int = 10,
     db: Session = Depends(get_db),
     response: Response = None
 ):
     """
-    Get all products for a given company by company ID.
+    Get all products for a given company by company ID with pagination.
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -299,7 +400,18 @@ def get_products_by_company(
             details={"company_id": company_id}
         )
 
-    products = db.query(Product).filter(Product.company_id == company_id).all()
+    # Calculate skip offset
+    skip = (page - 1) * page_size
+
+    # Get total count for this company's products
+    total = db.query(Product).filter(Product.company_id == company_id).count()
+
+    # Calculate total pages
+    total_pages = (total + page_size - 1) // page_size
+
+    # Get paginated products
+    products = db.query(Product).filter(Product.company_id == company_id).offset(skip).limit(page_size).all()
+
     response.status_code = status.HTTP_200_OK
     product_responses = []
     for p in products:
@@ -311,18 +423,28 @@ def get_products_by_company(
         success=True,
         status_code=200,
         message=f"Products for company '{company.name}' retrieved successfully",
-        data=product_responses
+        data=PaginatedListResponse(
+            items=product_responses,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages
+            )
+        )
     )
 
 
 @router.get("/products/by-category/{category_id}", tags=["Products"])
 def get_products_by_category(
     category_id: int,
+    page: int = 1,
+    page_size: int = 10,
     db: Session = Depends(get_db),
     response: Response = None
 ):
     """
-    Get all products for a given category by category ID.
+    Get all products for a given category by category ID with pagination.
     """
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
@@ -334,7 +456,18 @@ def get_products_by_category(
             details={"category_id": category_id}
         )
 
-    products = db.query(Product).filter(Product.category_id == category_id).all()
+    # Calculate skip offset
+    skip = (page - 1) * page_size
+
+    # Get total count for this category's products
+    total = db.query(Product).filter(Product.category_id == category_id).count()
+
+    # Calculate total pages
+    total_pages = (total + page_size - 1) // page_size
+
+    # Get paginated products
+    products = db.query(Product).filter(Product.category_id == category_id).offset(skip).limit(page_size).all()
+
     response.status_code = status.HTTP_200_OK
     product_responses = []
     for p in products:
@@ -346,7 +479,15 @@ def get_products_by_category(
         success=True,
         status_code=200,
         message=f"Products for category '{category.name}' retrieved successfully",
-        data=product_responses
+        data=PaginatedListResponse(
+            items=product_responses,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages
+            )
+        )
     )
 
 
